@@ -53,11 +53,11 @@ def load_model(model_name: str = "google/gemma-3-12b-it"):
     console.print(f"[cyan]Loading {model_name} with 8-bit quantization...[/cyan]")
 
     # Check if this is a known vision model
-    vision_model_patterns = ["llava", "qwen2-vl", "qwen-vl", "paligemma", "idefics", "cogvlm"]
+    vision_model_patterns = ["llava", "qwen2-vl", "qwen-vl", "paligemma", "idefics", "cogvlm", "gemma-3"]
     _is_vision_model = any(pattern in model_name.lower() for pattern in vision_model_patterns)
 
     try:
-        from transformers import AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoProcessor, BitsAndBytesConfig
         import torch
 
         quantization_config = BitsAndBytesConfig(
@@ -67,18 +67,18 @@ def load_model(model_name: str = "google/gemma-3-12b-it"):
 
         if _is_vision_model:
             console.print(f"[cyan]Detected vision model, loading with processor...[/cyan]")
-            from transformers import AutoProcessor, AutoModelForVision2Seq
+            from transformers import Gemma3ForConditionalGeneration
 
             _processor = AutoProcessor.from_pretrained(model_name)
             _tokenizer = _processor.tokenizer if hasattr(_processor, 'tokenizer') else _processor
-            _model = AutoModelForVision2Seq.from_pretrained(
+            _model = Gemma3ForConditionalGeneration.from_pretrained(
                 model_name,
                 quantization_config=quantization_config,
                 device_map="auto",
-                torch_dtype=torch.float16,
+                torch_dtype=torch.bfloat16,
             )
         else:
-            from transformers import AutoModelForCausalLM
+            from transformers import AutoModelForCausalLM, AutoTokenizer
 
             _tokenizer = AutoTokenizer.from_pretrained(model_name)
             _model = AutoModelForCausalLM.from_pretrained(
@@ -176,24 +176,43 @@ def analyze_single_response(
     )
 
     try:
-        if is_vision_model and processor and image:
-            # Vision model with image
-            messages = [{"role": "user", "content": [
-                {"type": "image"},
-                {"type": "text", "text": prompt},
-            ]}]
-            text = processor.apply_chat_template(messages, add_generation_prompt=True)
-            inputs = processor(text=text, images=image, return_tensors="pt").to(model.device)
+        if is_vision_model and processor:
+            # Gemma 3 vision model
+            if image:
+                messages = [{"role": "user", "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": prompt},
+                ]}]
+            else:
+                # Text-only with vision model
+                messages = [{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                ]}]
+
+            inputs = processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(model.device)
+
+            input_len = inputs["input_ids"].shape[1]
 
             with torch.no_grad():
-                outputs = model.generate(**inputs, max_new_tokens=300, temperature=0.3, do_sample=True)
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=300,
+                    do_sample=False,  # Greedy for more reliable JSON output
+                )
 
-            response_text = processor.decode(outputs[0], skip_special_tokens=True)
-            # Extract just the generated part (after the prompt)
-            if prompt in response_text:
-                response_text = response_text.split(prompt)[-1]
+            # Decode only the new tokens
+            response_text = processor.decode(
+                outputs[0][input_len:],
+                skip_special_tokens=True,
+            )
         else:
-            # Text-only model
+            # Text-only model (non-vision)
             messages = [{"role": "user", "content": prompt}]
 
             input_ids = tokenizer.apply_chat_template(
@@ -206,8 +225,7 @@ def analyze_single_response(
                 outputs = model.generate(
                     input_ids,
                     max_new_tokens=300,
-                    temperature=0.3,
-                    do_sample=True,
+                    do_sample=False,
                     pad_token_id=tokenizer.eos_token_id,
                 )
 
