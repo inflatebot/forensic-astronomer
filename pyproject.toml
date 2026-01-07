@@ -9,19 +9,10 @@ dependencies = [
     "click>=8.1.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
-]
-
-[project.optional-dependencies]
-graphs = [
     "matplotlib>=3.8.0",
     "pandas>=2.0.0",
-]
-sentiment = [
     "transformers>=4.36.0",
     "torch>=2.0.0",
-]
-all = [
-    "forensic-astronomer[graphs,sentiment]",
 ]
 
 [project.scripts]
