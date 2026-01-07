@@ -115,6 +115,12 @@ async def fetch_backlinks(
 
     data = response.json()
 
+    # Debug: print raw response structure
+    if not data.get("links"):
+        console.print(f"[dim]API response keys: {list(data.keys())}[/dim]")
+        if data:
+            console.print(f"[dim]Sample response: {str(data)[:500]}[/dim]")
+
     links = data.get("links", [])
     next_cursor = data.get("cursor")
 
