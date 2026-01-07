@@ -70,6 +70,8 @@ def save_analysis_result(result: AnalysisResult, directories: dict[str, Path]) -
                 "created_at": r.created_at.isoformat(),
                 "parent_id": r.parent_id,
                 "url": r.url,
+                "sentiment_label": r.sentiment_label,
+                "sentiment_score": r.sentiment_score,
             }
             for r in result.responses
         ],
@@ -155,6 +157,8 @@ def load_analysis_result(filepath: Path) -> AnalysisResult:
             created_at=datetime.fromisoformat(r["created_at"]),
             parent_id=r["parent_id"],
             url=r.get("url"),
+            sentiment_label=r.get("sentiment_label"),
+            sentiment_score=r.get("sentiment_score"),
         )
         for r in data["responses"]
     ]

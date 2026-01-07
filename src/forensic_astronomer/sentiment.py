@@ -100,6 +100,10 @@ def analyze_sentiments(
                 sentiments.append(sentiment)
                 timeline_data.append((response.created_at, sentiment))
 
+                # Write sentiment back to the response object
+                response.sentiment_label = sentiment.label
+                response.sentiment_score = sentiment.score
+
                 # Group by response type
                 type_name = response.response_type.value
                 if type_name not in sentiments_by_type:
@@ -189,14 +193,15 @@ def print_sentiment_summary(
         console.print("[bold]By Response Type:[/bold]")
 
         type_display_names = {
-            "reply": "Replies",
+            "reply": "Direct Replies (to OP)",
+            "thread_reply": "Thread Replies (to others)",
             "quote": "Quote Posts",
             "repost": "Reposts",
             "mention": "Mentions",
             "like": "Likes",
         }
 
-        for type_name in ["reply", "quote", "repost", "mention", "like"]:
+        for type_name in ["reply", "thread_reply", "quote", "repost", "mention", "like"]:
             if type_name not in type_breakdowns:
                 continue
 

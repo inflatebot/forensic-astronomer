@@ -52,7 +52,7 @@ def determine_response_type(record: dict, target_uri: str) -> ResponseType:
             return ResponseType.REPLY
         elif root_uri == target_uri and parent_uri:
             # Reply in the thread but not directly to target
-            return ResponseType.REPLY
+            return ResponseType.THREAD_REPLY
 
         # Check for quote post - embed.record.uri
         embed = record.get("embed", {})

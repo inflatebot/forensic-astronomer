@@ -17,7 +17,8 @@ class Platform(str, Enum):
 class ResponseType(str, Enum):
     """Types of responses/interactions."""
 
-    REPLY = "reply"
+    REPLY = "reply"              # Direct reply to the target post
+    THREAD_REPLY = "thread_reply"  # Reply to someone else in the thread
     QUOTE = "quote"
     REPOST = "repost"
     LIKE = "like"
@@ -47,6 +48,9 @@ class Response(BaseModel):
     parent_id: str
     url: Optional[str] = None
     raw_data: dict = Field(default_factory=dict)
+    # Sentiment fields (populated after sentiment analysis)
+    sentiment_label: Optional[str] = None  # positive, negative, neutral
+    sentiment_score: Optional[float] = None  # confidence score
 
 
 class AnalysisResult(BaseModel):

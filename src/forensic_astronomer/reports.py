@@ -20,6 +20,7 @@ def generate_summary_table(results: list[AnalysisResult]) -> Table:
     table.add_column("Source URL", style="blue")
     table.add_column("Total Responses", justify="right", style="green")
     table.add_column("Replies", justify="right")
+    table.add_column("Thread", justify="right")
     table.add_column("Quotes", justify="right")
     table.add_column("Reposts", justify="right")
     table.add_column("Mentions", justify="right")
@@ -30,6 +31,7 @@ def generate_summary_table(results: list[AnalysisResult]) -> Table:
             result.source_url[:50] + "..." if len(result.source_url) > 50 else result.source_url,
             str(result.total_responses),
             str(result.responses_by_type.get("reply", 0)),
+            str(result.responses_by_type.get("thread_reply", 0)),
             str(result.responses_by_type.get("quote", 0)),
             str(result.responses_by_type.get("repost", 0)),
             str(result.responses_by_type.get("mention", 0)),
@@ -53,17 +55,22 @@ def generate_text_report(
     # Summary statistics
     total_responses = sum(r.total_responses for r in results)
     total_replies = sum(r.responses_by_type.get("reply", 0) for r in results)
+    total_thread_replies = sum(r.responses_by_type.get("thread_reply", 0) for r in results)
     total_quotes = sum(r.responses_by_type.get("quote", 0) for r in results)
     total_reposts = sum(r.responses_by_type.get("repost", 0) for r in results)
     total_mentions = sum(r.responses_by_type.get("mention", 0) for r in results)
+    total_likes = sum(r.responses_by_type.get("like", 0) for r in results)
 
     lines.append("OVERALL SUMMARY")
     lines.append("-" * 40)
     lines.append(f"Total responses across all platforms: {total_responses}")
-    lines.append(f"  - Replies:  {total_replies}")
-    lines.append(f"  - Quotes:   {total_quotes}")
-    lines.append(f"  - Reposts:  {total_reposts}")
-    lines.append(f"  - Mentions: {total_mentions}")
+    lines.append(f"  - Replies (to OP):    {total_replies}")
+    lines.append(f"  - Thread replies:     {total_thread_replies}")
+    lines.append(f"  - Quotes:             {total_quotes}")
+    lines.append(f"  - Reposts:            {total_reposts}")
+    lines.append(f"  - Mentions:           {total_mentions}")
+    if total_likes > 0:
+        lines.append(f"  - Likes:              {total_likes}")
     lines.append("")
 
     # Per-platform breakdown
@@ -115,9 +122,52 @@ def generate_text_report(
             sentiment = sentiment_results[result.source_url]
             lines.append("Sentiment Analysis:")
             lines.append(f"  Analyzed: {sentiment.total_analyzed} responses")
-            for label, count in sorted(sentiment.sentiment_counts.items()):
+            lines.append("")
+            lines.append("  Overall:")
+            for label in ["positive", "neutral", "negative"]:
+                count = sentiment.sentiment_counts.get(label, 0)
                 percentage = (count / sentiment.total_analyzed * 100) if sentiment.total_analyzed > 0 else 0
-                lines.append(f"  - {label.title()}: {count} ({percentage:.1f}%)")
+                lines.append(f"    - {label.title()}: {count} ({percentage:.1f}%)")
+            lines.append("")
+
+            # Sentiment by response type (computed from Response objects)
+            type_display_names = {
+                "reply": "Direct Replies (to OP)",
+                "thread_reply": "Thread Replies (to others)",
+                "quote": "Quote Posts",
+                "repost": "Reposts",
+                "mention": "Mentions",
+                "like": "Likes",
+            }
+
+            # Group responses by type and compute sentiment
+            responses_with_sentiment = [r for r in result.responses if r.sentiment_label]
+            if responses_with_sentiment:
+                lines.append("  By Response Type:")
+
+                # Collect sentiments by response type
+                type_sentiments: dict[str, list[str]] = {}
+                for response in responses_with_sentiment:
+                    type_name = response.response_type.value
+                    if type_name not in type_sentiments:
+                        type_sentiments[type_name] = []
+                    type_sentiments[type_name].append(response.sentiment_label)
+
+                for type_name in ["reply", "thread_reply", "quote", "repost", "mention", "like"]:
+                    if type_name not in type_sentiments:
+                        continue
+
+                    sentiments = type_sentiments[type_name]
+                    display_name = type_display_names.get(type_name, type_name.title())
+                    total = len(sentiments)
+
+                    lines.append(f"    {display_name} ({total}):")
+
+                    for label in ["positive", "neutral", "negative"]:
+                        count = sum(1 for s in sentiments if s == label)
+                        percentage = (count / total * 100) if total > 0 else 0
+                        lines.append(f"      - {label.title()}: {count} ({percentage:.1f}%)")
+
             lines.append("")
 
     # Cross-platform comparison (if both platforms present)

@@ -124,14 +124,9 @@ async def run_analysis(
 
                 print_sentiment_summary(sentiment, type_breakdowns)
 
-                # Extract post ID for filename
-                url_parts = result.source_url.rstrip("/").split("/")
-                post_id = url_parts[-1] if url_parts else "unknown"
-
-                filepath = save_sentiment_results(
-                    sentiment, result.platform, post_id, directories
-                )
-                console.print(f"[green]Sentiment saved to: {filepath}[/green]")
+                # Re-save the main results file with sentiment data included
+                filepath = save_analysis_result(result, directories)
+                console.print(f"[green]Updated with sentiment: {filepath}[/green]")
         except ImportError as e:
             console.print(f"[yellow]Sentiment analysis unavailable: {e}[/yellow]")
 
