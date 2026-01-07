@@ -115,16 +115,10 @@ async def fetch_backlinks(
 
     data = response.json()
 
-    # Debug: print raw response structure
-    if not data.get("links"):
-        console.print(f"[dim]API response keys: {list(data.keys())}[/dim]")
-        if data:
-            console.print(f"[dim]Sample response: {str(data)[:500]}[/dim]")
-
-    links = data.get("links", [])
+    records = data.get("records", [])
     next_cursor = data.get("cursor")
 
-    return links, next_cursor
+    return records, next_cursor
 
 
 async def fetch_record(
@@ -192,23 +186,23 @@ async def resolve_handle(did: str, client: httpx.AsyncClient) -> str:
 
 
 async def parse_backlink_to_response(
-    link: dict,
+    record_info: dict,
     target_uri: str,
     client: httpx.AsyncClient,
 ) -> Response | None:
-    """Parse a backlink into a Response object."""
-    source_uri = link.get("source")
-    if not source_uri:
+    """Parse a backlink record into a Response object.
+
+    record_info has format: {did, collection, rkey}
+    """
+    did = record_info.get("did")
+    collection = record_info.get("collection")
+    rkey = record_info.get("rkey")
+
+    if not all([did, collection, rkey]):
         return None
 
-    # Parse the source URI
-    parts = source_uri.replace("at://", "").split("/")
-    if len(parts) < 3:
-        return None
-
-    did = parts[0]
-    collection = parts[1]
-    rkey = parts[2]
+    # Construct the AT URI
+    source_uri = f"at://{did}/{collection}/{rkey}"
 
     # Fetch the full record to get details
     record_data = await fetch_record(source_uri, client)
