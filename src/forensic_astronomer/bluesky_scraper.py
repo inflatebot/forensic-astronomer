@@ -255,6 +255,17 @@ async def scrape_bluesky_backlinks(
 
     console.print(f"[blue]Resolved AT URI: {at_uri}[/blue]")
 
+    # Fetch the original post to get its text and author
+    source_post_text = None
+    source_post_author = None
+    original_post = await fetch_record(at_uri, client)
+    if original_post:
+        source_post_text = original_post.get("value", {}).get("text")
+        # Get the DID from the URI and resolve to handle
+        did = at_uri.replace("at://", "").split("/")[0]
+        source_post_author = await resolve_handle(did, client)
+        console.print(f"[dim]Original post by @{source_post_author}: {source_post_text[:50] if source_post_text else '[no text]'}...[/dim]")
+
     responses: list[Response] = []
     seen_ids: set[str] = set()  # Track seen response IDs to avoid duplicates
 
@@ -326,4 +337,6 @@ async def scrape_bluesky_backlinks(
         total_responses=len(responses),
         responses_by_type=responses_by_type,
         responses=responses,
+        source_post_text=source_post_text,
+        source_post_author=source_post_author,
     )

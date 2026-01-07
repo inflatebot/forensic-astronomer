@@ -80,6 +80,7 @@ async def run_analysis(
     include_likes: bool = False,
     run_llm_analysis: bool = False,
     op_text: Optional[str] = None,
+    op_image: Optional[Path] = None,
     llm_model: str = "google/gemma-3-12b-it",
 ) -> tuple[list[AnalysisResult], dict[str, SentimentAnalysisResult]]:
     """Run the full analysis pipeline."""
@@ -143,6 +144,7 @@ async def run_analysis(
                 llm_result = analyze_responses(
                     result,
                     op_text=op_text,
+                    op_image=op_image,
                     model_name=llm_model,
                 )
 
@@ -250,7 +252,13 @@ async def run_analysis(
     "--op-text",
     type=str,
     default=None,
-    help="Original post text to provide context for LLM analysis",
+    help="Override original post text for LLM analysis (auto-fetched if not provided)",
+)
+@click.option(
+    "--op-image",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Screenshot of original post to provide visual context for LLM analysis (requires vision model)",
 )
 @click.option(
     "--model",
@@ -268,6 +276,7 @@ def main(
     include_likes: bool,
     analyze: bool,
     op_text: Optional[str],
+    op_image: Optional[Path],
     model: str,
 ):
     """Analyze cross-platform interactions for Twitter and Bluesky posts.
@@ -310,7 +319,9 @@ def main(
     if analyze:
         console.print(f"  Model: {model}")
         if op_text:
-            console.print(f"  OP text: {op_text[:50]}..." if len(op_text) > 50 else f"  OP text: {op_text}")
+            console.print(f"  OP text override: {op_text[:50]}..." if len(op_text) > 50 else f"  OP text override: {op_text}")
+        if op_image:
+            console.print(f"  OP image: {op_image}")
     console.print(f"Include likes: {'Yes' if include_likes else 'No'}")
     console.print(f"Use cached data: {'No (--force)' if force else 'Yes'}")
     console.print()
@@ -325,6 +336,7 @@ def main(
             include_likes,
             run_llm_analysis=analyze,
             op_text=op_text,
+            op_image=op_image,
             llm_model=model,
         ))
     except KeyboardInterrupt:

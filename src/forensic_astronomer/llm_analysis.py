@@ -1,4 +1,4 @@
-"""LLM-based analysis using Gemma 3 for rich response understanding."""
+"""LLM-based analysis using local LLMs for rich response understanding."""
 
 import json
 import re
@@ -20,6 +20,8 @@ console = Console()
 # Global model cache
 _model = None
 _tokenizer = None
+_processor = None  # For vision models
+_is_vision_model = False
 
 ANALYSIS_PROMPT = """Analyze this social media reply and respond with JSON only.
 
@@ -43,15 +45,19 @@ JSON only, no other text:"""
 
 def load_model(model_name: str = "google/gemma-3-12b-it"):
     """Load the model with 8-bit quantization."""
-    global _model, _tokenizer
+    global _model, _tokenizer, _processor, _is_vision_model
 
     if _model is not None:
-        return _model, _tokenizer
+        return _model, _tokenizer, _processor, _is_vision_model
 
     console.print(f"[cyan]Loading {model_name} with 8-bit quantization...[/cyan]")
 
+    # Check if this is a known vision model
+    vision_model_patterns = ["llava", "qwen2-vl", "qwen-vl", "paligemma", "idefics", "cogvlm"]
+    _is_vision_model = any(pattern in model_name.lower() for pattern in vision_model_patterns)
+
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoTokenizer, BitsAndBytesConfig
         import torch
 
         quantization_config = BitsAndBytesConfig(
@@ -59,20 +65,48 @@ def load_model(model_name: str = "google/gemma-3-12b-it"):
             llm_int8_enable_fp32_cpu_offload=False,
         )
 
-        _tokenizer = AutoTokenizer.from_pretrained(model_name)
-        _model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=quantization_config,
-            device_map="auto",
-            torch_dtype=torch.float16,
-        )
+        if _is_vision_model:
+            console.print(f"[cyan]Detected vision model, loading with processor...[/cyan]")
+            from transformers import AutoProcessor, AutoModelForVision2Seq
 
-        console.print(f"[green]Model loaded successfully[/green]")
-        return _model, _tokenizer
+            _processor = AutoProcessor.from_pretrained(model_name)
+            _tokenizer = _processor.tokenizer if hasattr(_processor, 'tokenizer') else _processor
+            _model = AutoModelForVision2Seq.from_pretrained(
+                model_name,
+                quantization_config=quantization_config,
+                device_map="auto",
+                torch_dtype=torch.float16,
+            )
+        else:
+            from transformers import AutoModelForCausalLM
+
+            _tokenizer = AutoTokenizer.from_pretrained(model_name)
+            _model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=quantization_config,
+                device_map="auto",
+                torch_dtype=torch.float16,
+            )
+
+        console.print(f"[green]Model loaded successfully (vision: {_is_vision_model})[/green]")
+        return _model, _tokenizer, _processor, _is_vision_model
 
     except Exception as e:
         console.print(f"[red]Failed to load model: {e}[/red]")
         raise
+
+
+def load_image(image_path: Path):
+    """Load an image for vision model input."""
+    try:
+        from PIL import Image
+        return Image.open(image_path).convert("RGB")
+    except ImportError:
+        console.print("[yellow]PIL not available for image loading[/yellow]")
+        return None
+    except Exception as e:
+        console.print(f"[yellow]Failed to load image {image_path}: {e}[/yellow]")
+        return None
 
 
 def parse_llm_response(text: str) -> Optional[dict]:
@@ -111,6 +145,9 @@ def analyze_single_response(
     op_text: str,
     model,
     tokenizer,
+    processor=None,
+    is_vision_model: bool = False,
+    image=None,
 ) -> Optional[ResponseAnalysis]:
     """Analyze a single response using the LLM."""
     import torch
@@ -125,30 +162,47 @@ def analyze_single_response(
         reply_text=response.text,
     )
 
-    # Format for Gemma 3 chat
-    messages = [{"role": "user", "content": prompt}]
-
     try:
-        input_ids = tokenizer.apply_chat_template(
-            messages,
-            return_tensors="pt",
-            add_generation_prompt=True,
-        ).to(model.device)
+        if is_vision_model and processor and image:
+            # Vision model with image
+            messages = [{"role": "user", "content": [
+                {"type": "image"},
+                {"type": "text", "text": prompt},
+            ]}]
+            text = processor.apply_chat_template(messages, add_generation_prompt=True)
+            inputs = processor(text=text, images=image, return_tensors="pt").to(model.device)
 
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids,
-                max_new_tokens=300,
-                temperature=0.3,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
+            with torch.no_grad():
+                outputs = model.generate(**inputs, max_new_tokens=300, temperature=0.3, do_sample=True)
+
+            response_text = processor.decode(outputs[0], skip_special_tokens=True)
+            # Extract just the generated part (after the prompt)
+            if prompt in response_text:
+                response_text = response_text.split(prompt)[-1]
+        else:
+            # Text-only model
+            messages = [{"role": "user", "content": prompt}]
+
+            input_ids = tokenizer.apply_chat_template(
+                messages,
+                return_tensors="pt",
+                add_generation_prompt=True,
+            ).to(model.device)
+
+            with torch.no_grad():
+                outputs = model.generate(
+                    input_ids,
+                    max_new_tokens=300,
+                    temperature=0.3,
+                    do_sample=True,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+            # Decode only the new tokens
+            response_text = tokenizer.decode(
+                outputs[0][input_ids.shape[1]:],
+                skip_special_tokens=True,
             )
-
-        # Decode only the new tokens
-        response_text = tokenizer.decode(
-            outputs[0][input_ids.shape[1]:],
-            skip_special_tokens=True,
-        )
 
         parsed = parse_llm_response(response_text)
         if not parsed:
@@ -190,28 +244,47 @@ def analyze_single_response(
 def analyze_responses(
     result: AnalysisResult,
     op_text: Optional[str] = None,
-    op_screenshot: Optional[Path] = None,
+    op_image: Optional[Path] = None,
     model_name: str = "google/gemma-3-12b-it",
 ) -> LLMAnalysisResult:
     """Analyze all responses in an AnalysisResult using the LLM."""
-    model, tokenizer = load_model(model_name)
+    model, tokenizer, processor, is_vision_model = load_model(model_name)
 
-    # Extract OP handle from source URL
-    op_handle = "unknown"
-    if "/status/" in result.source_url:
-        # Twitter URL
-        parts = result.source_url.split("/")
-        try:
-            op_handle = parts[parts.index("status") - 1]
-        except (ValueError, IndexError):
-            pass
-    elif "bsky.app" in result.source_url or "at://" in result.source_url:
-        # Bluesky URL
-        parts = result.source_url.split("/")
-        for part in parts:
-            if part.startswith("did:") or "." in part:
-                op_handle = part
-                break
+    # Use stored source post data, with CLI override
+    actual_op_text = op_text or result.source_post_text or "[Original post text not available]"
+    op_handle = result.source_post_author or "unknown"
+
+    # Fallback: try to extract handle from URL if not stored
+    if op_handle == "unknown":
+        if "/status/" in result.source_url:
+            # Twitter URL
+            parts = result.source_url.split("/")
+            try:
+                op_handle = parts[parts.index("status") - 1]
+            except (ValueError, IndexError):
+                pass
+        elif "bsky.app" in result.source_url or "at://" in result.source_url:
+            # Bluesky URL
+            parts = result.source_url.split("/")
+            for part in parts:
+                if part.startswith("did:") or "." in part:
+                    op_handle = part
+                    break
+
+    # Load image if provided
+    image = None
+    if op_image:
+        if not is_vision_model:
+            console.print(f"[yellow]Warning: --op-image provided but {model_name} is not a vision model.[/yellow]")
+            console.print(f"[yellow]Use a vision model like llava-hf/llava-1.5-7b-hf or Qwen/Qwen2-VL-7B-Instruct[/yellow]")
+        else:
+            image = load_image(op_image)
+            if image:
+                console.print(f"[green]Loaded image: {op_image}[/green]")
+
+    # Log what we're using
+    console.print(f"[dim]OP: @{op_handle}[/dim]")
+    console.print(f"[dim]Text: {actual_op_text[:100]}{'...' if len(actual_op_text) > 100 else ''}[/dim]")
 
     # Filter to responses with text content
     responses_to_analyze = [r for r in result.responses if r.text]
@@ -234,9 +307,12 @@ def analyze_responses(
             analysis = analyze_single_response(
                 response=response,
                 op_handle=op_handle,
-                op_text=op_text or "[Original post text not provided]",
+                op_text=actual_op_text,
                 model=model,
                 tokenizer=tokenizer,
+                processor=processor,
+                is_vision_model=is_vision_model,
+                image=image,
             )
 
             if analysis:

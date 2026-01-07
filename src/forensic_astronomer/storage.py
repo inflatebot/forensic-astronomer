@@ -59,6 +59,8 @@ def save_analysis_result(result: AnalysisResult, directories: dict[str, Path]) -
         "total_responses": result.total_responses,
         "responses_by_type": result.responses_by_type,
         "fetched_at": result.fetched_at.isoformat(),
+        "source_post_text": result.source_post_text,
+        "source_post_author": result.source_post_author,
         "responses": [
             {
                 "id": r.id,
@@ -184,4 +186,6 @@ def load_analysis_result(filepath: Path) -> AnalysisResult:
         responses_by_type=data["responses_by_type"],
         responses=responses,
         fetched_at=datetime.fromisoformat(data["fetched_at"]),
+        source_post_text=data.get("source_post_text"),
+        source_post_author=data.get("source_post_author"),
     )

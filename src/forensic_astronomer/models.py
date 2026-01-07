@@ -69,6 +69,9 @@ class AnalysisResult(BaseModel):
     responses_by_type: dict[str, int]
     responses: list[Response]
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    # Original post data (fetched during scraping)
+    source_post_text: Optional[str] = None
+    source_post_author: Optional[str] = None
 
 
 class SentimentScore(BaseModel):
