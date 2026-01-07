@@ -26,8 +26,6 @@ def generate_timeline_graph(
     Returns:
         Path to the saved graph
     """
-    fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharex=align_start)
-
     colors = {
         Platform.TWITTER: "#1DA1F2",  # Twitter blue
         Platform.BLUESKY: "#0085FF",  # Bluesky blue
@@ -48,9 +46,17 @@ def generate_timeline_graph(
                     platform_starts[result.platform], min(times)
                 )
 
+    # Create subplots based on actual platforms with data
+    num_plots = max(1, len(platform_data))
+    fig, axes = plt.subplots(num_plots, 1, figsize=(14, 5 * num_plots), sharex=align_start)
+
+    # Ensure axes is always a list
+    if num_plots == 1:
+        axes = [axes]
+
     # Calculate time bins (hourly)
     for idx, (platform, times) in enumerate(platform_data.items()):
-        ax = axes[idx] if len(platform_data) > 1 else axes
+        ax = axes[idx]
 
         if not times:
             continue
