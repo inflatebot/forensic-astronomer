@@ -75,13 +75,31 @@ def determine_response_type(record: dict, target_uri: str) -> ResponseType:
     return ResponseType.MENTION
 
 
+# Source patterns for different link types
+# Format: collection:path.to.uri.field
+BACKLINK_SOURCES = {
+    "reply_parent": "app.bsky.feed.post:reply.parent.uri",      # Direct replies
+    "reply_root": "app.bsky.feed.post:reply.root.uri",          # Thread replies
+    "quote": "app.bsky.feed.post:embed.record.uri",             # Quote posts
+    "quote_media": "app.bsky.feed.post:embed.record.record.uri",# Quote posts with media
+    "repost": "app.bsky.feed.repost:subject.uri",               # Reposts
+    "like": "app.bsky.feed.like:subject.uri",                   # Likes
+}
+
+
 async def fetch_backlinks(
     at_uri: str,
+    source: str,
     client: httpx.AsyncClient,
     cursor: str | None = None,
+    limit: int = 100,
 ) -> tuple[list[dict], str | None]:
     """Fetch backlinks for a given AT URI from Constellation."""
-    params = {"subject": at_uri}
+    params = {
+        "subject": at_uri,
+        "source": source,
+        "limit": limit,
+    }
     if cursor:
         params["cursor"] = cursor
 
@@ -237,41 +255,59 @@ async def scrape_bluesky_backlinks(
     console.print(f"[blue]Resolved AT URI: {at_uri}[/blue]")
 
     responses: list[Response] = []
-    cursor = None
-    page = 0
+    seen_ids: set[str] = set()  # Track seen response IDs to avoid duplicates
 
-    while True:
-        page += 1
-        if progress_callback:
-            progress_callback(f"Fetching backlinks page {page}...")
+    # Fetch backlinks for each source type
+    for source_name, source_pattern in BACKLINK_SOURCES.items():
+        console.print(f"[dim]Fetching {source_name} backlinks...[/dim]")
+        cursor = None
+        page = 0
+        source_count = 0
 
-        links, cursor = await fetch_backlinks(at_uri, client, cursor)
+        while True:
+            page += 1
+            if progress_callback:
+                progress_callback(f"Fetching {source_name} page {page}...")
 
-        if not links:
-            break
+            try:
+                links, cursor = await fetch_backlinks(at_uri, source_pattern, client, cursor)
+            except Exception as e:
+                console.print(f"[yellow]Warning fetching {source_name}: {e}[/yellow]")
+                break
 
-        console.print(f"[dim]Page {page}: Found {len(links)} backlinks[/dim]")
+            if not links:
+                break
 
-        # Process links concurrently in batches
-        batch_size = 10
-        for i in range(0, len(links), batch_size):
-            batch = links[i : i + batch_size]
-            tasks = [
-                parse_backlink_to_response(link, at_uri, client) for link in batch
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            source_count += len(links)
 
-            for result in results:
-                if isinstance(result, Response):
-                    responses.append(result)
-                elif isinstance(result, Exception):
-                    console.print(f"[yellow]Warning: {result}[/yellow]")
+            # Process links concurrently in batches
+            batch_size = 10
+            for i in range(0, len(links), batch_size):
+                batch = links[i : i + batch_size]
+                tasks = [
+                    parse_backlink_to_response(link, at_uri, client) for link in batch
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Small delay to be polite to the API
-            await asyncio.sleep(0.1)
+                for result in results:
+                    if isinstance(result, Response):
+                        # Avoid duplicates (same post might appear in multiple source types)
+                        if result.id not in seen_ids:
+                            seen_ids.add(result.id)
+                            responses.append(result)
+                    elif isinstance(result, Exception):
+                        console.print(f"[yellow]Warning: {result}[/yellow]")
 
-        if not cursor:
-            break
+                # Small delay to be polite to the API
+                await asyncio.sleep(0.1)
+
+            if not cursor:
+                break
+
+        if source_count > 0:
+            console.print(f"[dim]  Found {source_count} {source_name} links[/dim]")
+
+    console.print(f"[green]Total unique responses: {len(responses)}[/green]")
 
     # Count responses by type
     responses_by_type: dict[str, int] = {}
