@@ -90,7 +90,11 @@ async def fetch_backlinks(
         params=params,
         headers={"User-Agent": USER_AGENT},
     )
-    response.raise_for_status()
+
+    if response.status_code != 200:
+        console.print(f"[red]API Error {response.status_code}: {response.text}[/red]")
+        response.raise_for_status()
+
     data = response.json()
 
     links = data.get("links", [])
