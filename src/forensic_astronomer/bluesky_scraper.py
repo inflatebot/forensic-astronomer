@@ -81,7 +81,7 @@ async def fetch_backlinks(
     cursor: str | None = None,
 ) -> tuple[list[dict], str | None]:
     """Fetch backlinks for a given AT URI from Constellation."""
-    params = {"target": at_uri}
+    params = {"subject": at_uri}
     if cursor:
         params["cursor"] = cursor
 
