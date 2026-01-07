@@ -72,6 +72,13 @@ def save_analysis_result(result: AnalysisResult, directories: dict[str, Path]) -
                 "url": r.url,
                 "sentiment_label": r.sentiment_label,
                 "sentiment_score": r.sentiment_score,
+                # LLM analysis fields
+                "llm_is_upset": r.llm_is_upset,
+                "llm_upset_at": r.llm_upset_at,
+                "llm_intent": r.llm_intent,
+                "llm_rhetorical_point": r.llm_rhetorical_point,
+                "llm_stance": r.llm_stance,
+                "llm_reasoning": r.llm_reasoning,
             }
             for r in result.responses
         ],
@@ -159,6 +166,13 @@ def load_analysis_result(filepath: Path) -> AnalysisResult:
             url=r.get("url"),
             sentiment_label=r.get("sentiment_label"),
             sentiment_score=r.get("sentiment_score"),
+            # LLM analysis fields
+            llm_is_upset=r.get("llm_is_upset"),
+            llm_upset_at=r.get("llm_upset_at"),
+            llm_intent=r.get("llm_intent"),
+            llm_rhetorical_point=r.get("llm_rhetorical_point"),
+            llm_stance=r.get("llm_stance"),
+            llm_reasoning=r.get("llm_reasoning"),
         )
         for r in data["responses"]
     ]

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,13 @@ class Response(BaseModel):
     # Sentiment fields (populated after sentiment analysis)
     sentiment_label: Optional[str] = None  # positive, negative, neutral
     sentiment_score: Optional[float] = None  # confidence score
+    # Rich LLM analysis fields (populated after LLM analysis)
+    llm_is_upset: Optional[bool] = None
+    llm_upset_at: Optional[str] = None
+    llm_intent: Optional[str] = None
+    llm_rhetorical_point: Optional[str] = None
+    llm_stance: Optional[str] = None
+    llm_reasoning: Optional[str] = None
 
 
 class AnalysisResult(BaseModel):
@@ -79,3 +86,45 @@ class SentimentAnalysisResult(BaseModel):
     sentiment_counts: dict[str, int]
     average_scores: dict[str, float]
     sentiments: list[SentimentScore]
+
+
+# Rich LLM-based analysis models
+
+UpsetAt = Literal["op", "on_behalf_of_op", "third_party", "situation", "unclear"]
+Intent = Literal[
+    "emotional_expression",
+    "rhetorical_point",
+    "question",
+    "agreement",
+    "disagreement",
+    "humor",
+    "information",
+    "other",
+]
+Stance = Literal["supportive", "critical", "neutral", "mixed"]
+
+
+class ResponseAnalysis(BaseModel):
+    """Rich analysis of a response using LLM reasoning."""
+
+    response_id: str
+    is_upset: bool
+    upset_at: Optional[UpsetAt] = None
+    intent: Intent
+    rhetorical_point: Optional[str] = None  # Summary if making a rhetorical point
+    stance_toward_op: Stance
+    confidence: float  # Model's confidence in this analysis
+    reasoning: str  # Brief explanation of the analysis
+
+
+class LLMAnalysisResult(BaseModel):
+    """Result of LLM-based analysis on responses."""
+
+    model_name: str
+    total_analyzed: int
+    analyses: list[ResponseAnalysis]
+    # Aggregate stats
+    upset_count: int
+    upset_at_counts: dict[str, int]
+    intent_counts: dict[str, int]
+    stance_counts: dict[str, int]

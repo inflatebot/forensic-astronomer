@@ -9,7 +9,7 @@ import click
 import httpx
 from rich.console import Console
 
-from .models import AnalysisResult, Platform, SentimentAnalysisResult
+from .models import AnalysisResult, Platform, SentimentAnalysisResult, LLMAnalysisResult
 from .parsers import parse_url
 from .storage import (
     ensure_directories,
@@ -78,6 +78,9 @@ async def run_analysis(
     run_sentiment: bool = False,
     force_rescrape: bool = False,
     include_likes: bool = False,
+    run_llm_analysis: bool = False,
+    op_text: Optional[str] = None,
+    llm_model: str = "google/gemma-3-12b-it",
 ) -> tuple[list[AnalysisResult], dict[str, SentimentAnalysisResult]]:
     """Run the full analysis pipeline."""
     results: list[AnalysisResult] = []
@@ -129,6 +132,31 @@ async def run_analysis(
                 console.print(f"[green]Updated with sentiment: {filepath}[/green]")
         except ImportError as e:
             console.print(f"[yellow]Sentiment analysis unavailable: {e}[/yellow]")
+
+    # Run LLM analysis if requested
+    if run_llm_analysis and results:
+        try:
+            from .llm_analysis import analyze_responses, print_llm_analysis_summary
+
+            for result in results:
+                console.print(f"\n[blue]Running LLM analysis for {result.platform.value}...[/blue]")
+                llm_result = analyze_responses(
+                    result,
+                    op_text=op_text,
+                    model_name=llm_model,
+                )
+
+                print_llm_analysis_summary(llm_result)
+
+                # Re-save the main results file with LLM analysis data included
+                filepath = save_analysis_result(result, directories)
+                console.print(f"[green]Updated with LLM analysis: {filepath}[/green]")
+        except ImportError as e:
+            console.print(f"[yellow]LLM analysis unavailable: {e}[/yellow]")
+        except Exception as e:
+            console.print(f"[red]LLM analysis failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
 
     # Generate graphs if requested
     if generate_graphs and results:
@@ -211,6 +239,25 @@ async def run_analysis(
     default=False,
     help="Include likes in the analysis (skipped by default as they have no text)",
 )
+@click.option(
+    "--analyze",
+    "-a",
+    is_flag=True,
+    default=False,
+    help="Run LLM-based analysis (requires GPU, uses Gemma 3 12B by default)",
+)
+@click.option(
+    "--op-text",
+    type=str,
+    default=None,
+    help="Original post text to provide context for LLM analysis",
+)
+@click.option(
+    "--model",
+    type=str,
+    default="google/gemma-3-12b-it",
+    help="HuggingFace model to use for LLM analysis (default: google/gemma-3-12b-it)",
+)
 def main(
     urls: tuple[str, ...],
     output: Optional[Path],
@@ -219,6 +266,9 @@ def main(
     twitter_token: Optional[str],
     force: bool,
     include_likes: bool,
+    analyze: bool,
+    op_text: Optional[str],
+    model: str,
 ):
     """Analyze cross-platform interactions for Twitter and Bluesky posts.
 
@@ -256,12 +306,27 @@ def main(
     console.print(f"URLs to analyze: {len(urls)}")
     console.print(f"Graphs: {'Yes' if graphs else 'No'}")
     console.print(f"Sentiment: {'Yes' if sentiment else 'No'}")
+    console.print(f"LLM Analysis: {'Yes' if analyze else 'No'}")
+    if analyze:
+        console.print(f"  Model: {model}")
+        if op_text:
+            console.print(f"  OP text: {op_text[:50]}..." if len(op_text) > 50 else f"  OP text: {op_text}")
     console.print(f"Include likes: {'Yes' if include_likes else 'No'}")
     console.print(f"Use cached data: {'No (--force)' if force else 'Yes'}")
     console.print()
 
     try:
-        asyncio.run(run_analysis(list(urls), output_dir, graphs, sentiment, force, include_likes))
+        asyncio.run(run_analysis(
+            list(urls),
+            output_dir,
+            graphs,
+            sentiment,
+            force,
+            include_likes,
+            run_llm_analysis=analyze,
+            op_text=op_text,
+            llm_model=model,
+        ))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
     except Exception as e:

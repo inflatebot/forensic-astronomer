@@ -170,6 +170,84 @@ def generate_text_report(
 
             lines.append("")
 
+        # LLM Analysis summary (if available)
+        responses_with_llm = [r for r in result.responses if r.llm_intent is not None]
+        if responses_with_llm:
+            lines.append("LLM Analysis:")
+            lines.append(f"  Analyzed: {len(responses_with_llm)} responses")
+            lines.append("")
+
+            # Upset breakdown
+            upset_responses = [r for r in responses_with_llm if r.llm_is_upset]
+            upset_pct = len(upset_responses) / len(responses_with_llm) * 100
+            lines.append(f"  Upset responses: {len(upset_responses)} ({upset_pct:.1f}%)")
+
+            if upset_responses:
+                # Upset at breakdown
+                upset_at_counts: dict[str, int] = {}
+                for r in upset_responses:
+                    target = r.llm_upset_at or "unclear"
+                    upset_at_counts[target] = upset_at_counts.get(target, 0) + 1
+
+                upset_at_names = {
+                    "op": "At the OP (critical)",
+                    "on_behalf_of_op": "On OP's behalf (supportive)",
+                    "third_party": "At third party",
+                    "situation": "At the situation",
+                    "unclear": "Unclear",
+                }
+                lines.append("  Upset at:")
+                for target, count in sorted(upset_at_counts.items(), key=lambda x: -x[1]):
+                    pct = count / len(upset_responses) * 100
+                    name = upset_at_names.get(target, target)
+                    lines.append(f"    - {name}: {count} ({pct:.1f}%)")
+            lines.append("")
+
+            # Intent breakdown
+            intent_counts: dict[str, int] = {}
+            for r in responses_with_llm:
+                intent = r.llm_intent or "other"
+                intent_counts[intent] = intent_counts.get(intent, 0) + 1
+
+            intent_names = {
+                "emotional_expression": "Emotional expression",
+                "rhetorical_point": "Making a point",
+                "question": "Asking question",
+                "agreement": "Agreement",
+                "disagreement": "Disagreement",
+                "humor": "Humor",
+                "information": "Sharing info",
+                "other": "Other",
+            }
+            lines.append("  Intent:")
+            for intent, count in sorted(intent_counts.items(), key=lambda x: -x[1]):
+                pct = count / len(responses_with_llm) * 100
+                name = intent_names.get(intent, intent)
+                lines.append(f"    - {name}: {count} ({pct:.1f}%)")
+            lines.append("")
+
+            # Stance breakdown
+            stance_counts: dict[str, int] = {}
+            for r in responses_with_llm:
+                stance = r.llm_stance or "neutral"
+                stance_counts[stance] = stance_counts.get(stance, 0) + 1
+
+            lines.append("  Stance toward OP:")
+            for stance, count in sorted(stance_counts.items(), key=lambda x: -x[1]):
+                pct = count / len(responses_with_llm) * 100
+                lines.append(f"    - {stance.title()}: {count} ({pct:.1f}%)")
+            lines.append("")
+
+            # Rhetorical points
+            rhetorical = [r for r in responses_with_llm if r.llm_rhetorical_point]
+            if rhetorical:
+                lines.append(f"  Rhetorical points made ({len(rhetorical)}):")
+                for r in rhetorical[:10]:
+                    lines.append(f"    - {r.llm_rhetorical_point}")
+                if len(rhetorical) > 10:
+                    lines.append(f"    ... and {len(rhetorical) - 10} more")
+                lines.append("")
+
     # Cross-platform comparison (if both platforms present)
     twitter_results = [r for r in results if r.platform == Platform.TWITTER]
     bluesky_results = [r for r in results if r.platform == Platform.BLUESKY]
