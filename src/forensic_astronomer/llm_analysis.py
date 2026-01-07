@@ -88,7 +88,13 @@ def load_model(model_name: str = "google/gemma-3-12b-it"):
                 torch_dtype=torch.float16,
             )
 
+        # Print diagnostic info
         console.print(f"[green]Model loaded successfully (vision: {_is_vision_model})[/green]")
+        console.print(f"[dim]  Vocab size: {len(_tokenizer)}[/dim]")
+        console.print(f"[dim]  Model device: {next(_model.parameters()).device}[/dim]")
+        if hasattr(_model.config, 'max_position_embeddings'):
+            console.print(f"[dim]  Max context: {_model.config.max_position_embeddings}[/dim]")
+
         return _model, _tokenizer, _processor, _is_vision_model
 
     except Exception as e:
@@ -155,11 +161,18 @@ def analyze_single_response(
     if not response.text:
         return None
 
+    # Sanitize text to avoid tokenizer issues
+    def sanitize(text: str) -> str:
+        if not text:
+            return ""
+        # Replace problematic characters that can cause tokenizer issues
+        return text.encode('utf-8', errors='replace').decode('utf-8')
+
     prompt = ANALYSIS_PROMPT.format(
-        op_handle=op_handle,
-        op_text=op_text or "[No text available]",
-        reply_handle=response.author_handle,
-        reply_text=response.text,
+        op_handle=sanitize(op_handle),
+        op_text=sanitize(op_text) or "[No text available]",
+        reply_handle=sanitize(response.author_handle),
+        reply_text=sanitize(response.text),
     )
 
     try:
@@ -236,6 +249,21 @@ def analyze_single_response(
             reasoning=parsed.get("reasoning", ""),
         )
 
+    except RuntimeError as e:
+        error_str = str(e)
+        if "CUDA" in error_str or "device-side assert" in error_str:
+            console.print(f"[red]CUDA error for {response.id}, resetting...[/red]")
+            # Try to recover CUDA state
+            try:
+                import torch
+                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            except Exception:
+                pass
+        else:
+            console.print(f"[red]Error analyzing {response.id}: {e}[/red]")
+        return None
     except Exception as e:
         console.print(f"[red]Error analyzing {response.id}: {e}[/red]")
         return None
