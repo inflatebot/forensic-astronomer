@@ -61,18 +61,24 @@ def analyze_response_sentiment(
 def analyze_sentiments(
     result: AnalysisResult,
     progress_callback=None,
-) -> tuple[SentimentAnalysisResult, list[tuple[datetime, SentimentScore]]]:
+) -> tuple[SentimentAnalysisResult, list[tuple[datetime, SentimentScore]], dict[str, dict]]:
     """Analyze sentiment for all responses in an analysis result.
 
     Returns:
-        Tuple of (SentimentAnalysisResult, list of (datetime, sentiment) pairs for timeline)
+        Tuple of:
+        - SentimentAnalysisResult: Overall sentiment results
+        - list of (datetime, sentiment) pairs for timeline
+        - dict mapping response_type to sentiment breakdown
     """
     console.print("[blue]Loading sentiment analysis model...[/blue]")
-    pipeline = get_sentiment_pipeline()
+    sentiment_pipeline = get_sentiment_pipeline()
     console.print("[green]Model loaded.[/green]")
 
     sentiments: list[SentimentScore] = []
     timeline_data: list[tuple[datetime, SentimentScore]] = []
+
+    # Track sentiments by response type
+    sentiments_by_type: dict[str, list[tuple[Response, SentimentScore]]] = {}
 
     responses_with_text = [r for r in result.responses if r.text]
 
@@ -89,14 +95,20 @@ def analyze_sentiments(
         )
 
         for response in responses_with_text:
-            sentiment = analyze_response_sentiment(response, pipeline)
+            sentiment = analyze_response_sentiment(response, sentiment_pipeline)
             if sentiment:
                 sentiments.append(sentiment)
                 timeline_data.append((response.created_at, sentiment))
 
+                # Group by response type
+                type_name = response.response_type.value
+                if type_name not in sentiments_by_type:
+                    sentiments_by_type[type_name] = []
+                sentiments_by_type[type_name].append((response, sentiment))
+
             progress.advance(task)
 
-    # Count sentiments
+    # Count overall sentiments
     sentiment_counts: dict[str, int] = {}
     score_sums: dict[str, float] = {}
 
@@ -111,6 +123,28 @@ def analyze_sentiments(
         for label in sentiment_counts
     }
 
+    # Calculate sentiment breakdown by response type
+    type_breakdowns: dict[str, dict] = {}
+    for type_name, type_sentiments in sentiments_by_type.items():
+        type_counts: dict[str, int] = {}
+        type_score_sums: dict[str, float] = {}
+
+        for response, sentiment in type_sentiments:
+            label = sentiment.label
+            type_counts[label] = type_counts.get(label, 0) + 1
+            type_score_sums[label] = type_score_sums.get(label, 0) + sentiment.score
+
+        type_avg_scores = {
+            label: type_score_sums[label] / type_counts[label]
+            for label in type_counts
+        }
+
+        type_breakdowns[type_name] = {
+            "total": len(type_sentiments),
+            "counts": type_counts,
+            "average_scores": type_avg_scores,
+        }
+
     analysis_result = SentimentAnalysisResult(
         total_analyzed=len(sentiments),
         sentiment_counts=sentiment_counts,
@@ -118,16 +152,21 @@ def analyze_sentiments(
         sentiments=sentiments,
     )
 
-    return analysis_result, timeline_data
+    return analysis_result, timeline_data, type_breakdowns
 
 
-def print_sentiment_summary(result: SentimentAnalysisResult):
+def print_sentiment_summary(
+    result: SentimentAnalysisResult,
+    type_breakdowns: dict[str, dict] | None = None,
+):
     """Print a summary of sentiment analysis to the console."""
     console.print()
     console.print("[bold]Sentiment Analysis Summary[/bold]")
     console.print(f"Total analyzed: {result.total_analyzed}")
     console.print()
 
+    # Overall sentiment
+    console.print("[bold]Overall:[/bold]")
     for label in ["positive", "neutral", "negative"]:
         count = result.sentiment_counts.get(label, 0)
         percentage = (count / result.total_analyzed * 100) if result.total_analyzed > 0 else 0
@@ -140,6 +179,43 @@ def print_sentiment_summary(result: SentimentAnalysisResult):
         }.get(label, "white")
 
         console.print(
-            f"[{color}]{label.title()}[/{color}]: {count} ({percentage:.1f}%) - "
+            f"  [{color}]{label.title()}[/{color}]: {count} ({percentage:.1f}%) - "
             f"avg confidence: {avg_score:.2f}"
         )
+
+    # Breakdown by response type
+    if type_breakdowns:
+        console.print()
+        console.print("[bold]By Response Type:[/bold]")
+
+        type_display_names = {
+            "reply": "Replies",
+            "quote": "Quote Posts",
+            "repost": "Reposts",
+            "mention": "Mentions",
+            "like": "Likes",
+        }
+
+        for type_name in ["reply", "quote", "repost", "mention", "like"]:
+            if type_name not in type_breakdowns:
+                continue
+
+            breakdown = type_breakdowns[type_name]
+            display_name = type_display_names.get(type_name, type_name.title())
+            total = breakdown["total"]
+
+            console.print(f"\n  [cyan]{display_name}[/cyan] ({total} analyzed):")
+
+            for label in ["positive", "neutral", "negative"]:
+                count = breakdown["counts"].get(label, 0)
+                percentage = (count / total * 100) if total > 0 else 0
+
+                color = {
+                    "positive": "green",
+                    "neutral": "white",
+                    "negative": "red",
+                }.get(label, "white")
+
+                console.print(
+                    f"    [{color}]{label.title()}[/{color}]: {count} ({percentage:.1f}%)"
+                )

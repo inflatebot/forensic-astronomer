@@ -245,6 +245,7 @@ async def scrape_bluesky_backlinks(
     parsed_url: ParsedURL,
     client: httpx.AsyncClient,
     progress_callback=None,
+    include_likes: bool = False,
 ) -> AnalysisResult:
     """Scrape all backlinks for a Bluesky post."""
     # Get the AT URI
@@ -259,6 +260,10 @@ async def scrape_bluesky_backlinks(
 
     # Fetch backlinks for each source type
     for source_name, source_pattern in BACKLINK_SOURCES.items():
+        # Skip likes unless explicitly requested
+        if source_name == "like" and not include_likes:
+            console.print(f"[dim]Skipping likes (use --include-likes to include)[/dim]")
+            continue
         console.print(f"[dim]Fetching {source_name} backlinks...[/dim]")
         cursor = None
         page = 0

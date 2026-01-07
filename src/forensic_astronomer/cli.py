@@ -50,7 +50,7 @@ def find_existing_data(url: str, directories: dict[str, Path]) -> AnalysisResult
     return None
 
 
-async def scrape_url(url: str, client: httpx.AsyncClient) -> Optional[AnalysisResult]:
+async def scrape_url(url: str, client: httpx.AsyncClient, include_likes: bool = False) -> Optional[AnalysisResult]:
     """Scrape a single URL and return the analysis result."""
     parsed = parse_url(url)
     if not parsed:
@@ -62,7 +62,7 @@ async def scrape_url(url: str, client: httpx.AsyncClient) -> Optional[AnalysisRe
     if parsed.platform == Platform.BLUESKY:
         from .bluesky_scraper import scrape_bluesky_backlinks
 
-        return await scrape_bluesky_backlinks(parsed, client)
+        return await scrape_bluesky_backlinks(parsed, client, include_likes=include_likes)
     elif parsed.platform == Platform.TWITTER:
         from .twitter_scraper import scrape_twitter_responses
 
@@ -77,6 +77,7 @@ async def run_analysis(
     generate_graphs: bool = False,
     run_sentiment: bool = False,
     force_rescrape: bool = False,
+    include_likes: bool = False,
 ) -> tuple[list[AnalysisResult], dict[str, SentimentAnalysisResult]]:
     """Run the full analysis pipeline."""
     results: list[AnalysisResult] = []
@@ -95,7 +96,7 @@ async def run_analysis(
                         results.append(existing)
                         continue
 
-                result = await scrape_url(url, client)
+                result = await scrape_url(url, client, include_likes)
                 if result:
                     results.append(result)
 
@@ -117,11 +118,11 @@ async def run_analysis(
 
             for result in results:
                 console.print(f"\n[blue]Running sentiment analysis for {result.platform.value}...[/blue]")
-                sentiment, timeline = analyze_sentiments(result)
+                sentiment, timeline, type_breakdowns = analyze_sentiments(result)
                 sentiment_results[result.source_url] = sentiment
                 sentiment_timeline_data[result.source_url] = timeline
 
-                print_sentiment_summary(sentiment)
+                print_sentiment_summary(sentiment, type_breakdowns)
 
                 # Extract post ID for filename
                 url_parts = result.source_url.rstrip("/").split("/")
@@ -209,6 +210,12 @@ async def run_analysis(
     default=False,
     help="Force re-scraping even if data exists in output directory",
 )
+@click.option(
+    "--include-likes",
+    is_flag=True,
+    default=False,
+    help="Include likes in the analysis (skipped by default as they have no text)",
+)
 def main(
     urls: tuple[str, ...],
     output: Optional[Path],
@@ -216,6 +223,7 @@ def main(
     sentiment: bool,
     twitter_token: Optional[str],
     force: bool,
+    include_likes: bool,
 ):
     """Analyze cross-platform interactions for Twitter and Bluesky posts.
 
@@ -253,11 +261,12 @@ def main(
     console.print(f"URLs to analyze: {len(urls)}")
     console.print(f"Graphs: {'Yes' if graphs else 'No'}")
     console.print(f"Sentiment: {'Yes' if sentiment else 'No'}")
+    console.print(f"Include likes: {'Yes' if include_likes else 'No'}")
     console.print(f"Use cached data: {'No (--force)' if force else 'Yes'}")
     console.print()
 
     try:
-        asyncio.run(run_analysis(list(urls), output_dir, graphs, sentiment, force))
+        asyncio.run(run_analysis(list(urls), output_dir, graphs, sentiment, force, include_likes))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
     except Exception as e:
