@@ -17,10 +17,37 @@ from .storage import (
     save_analysis_result,
     save_raw_responses,
     save_sentiment_results,
+    load_analysis_result,
 )
 from .reports import generate_text_report, print_summary, save_report
 
 console = Console()
+
+
+def find_existing_data(url: str, directories: dict[str, Path]) -> AnalysisResult | None:
+    """Check if we already have scraped data for this URL."""
+    # Extract post ID from URL
+    url_parts = url.rstrip("/").split("/")
+    post_id = url_parts[-1] if url_parts else None
+    if not post_id:
+        return None
+
+    # Check both platform directories
+    for platform_name in ["bluesky", "twitter"]:
+        platform_dir = directories.get(platform_name)
+        if not platform_dir:
+            continue
+
+        response_file = platform_dir / f"{post_id}_responses.json"
+        if response_file.exists():
+            try:
+                result = load_analysis_result(response_file)
+                console.print(f"[cyan]Found existing data for {url}[/cyan]")
+                return result
+            except Exception as e:
+                console.print(f"[yellow]Could not load existing data: {e}[/yellow]")
+
+    return None
 
 
 async def scrape_url(url: str, client: httpx.AsyncClient) -> Optional[AnalysisResult]:
@@ -49,6 +76,7 @@ async def run_analysis(
     output_dir: Path,
     generate_graphs: bool = False,
     run_sentiment: bool = False,
+    force_rescrape: bool = False,
 ) -> tuple[list[AnalysisResult], dict[str, SentimentAnalysisResult]]:
     """Run the full analysis pipeline."""
     results: list[AnalysisResult] = []
@@ -60,6 +88,13 @@ async def run_analysis(
     async with httpx.AsyncClient(timeout=30.0) as client:
         for url in urls:
             try:
+                # Check for existing data first (unless force rescrape)
+                if not force_rescrape:
+                    existing = find_existing_data(url, directories)
+                    if existing:
+                        results.append(existing)
+                        continue
+
                 result = await scrape_url(url, client)
                 if result:
                     results.append(result)
@@ -167,12 +202,20 @@ async def run_analysis(
     envvar="TWITTER_BEARER_TOKEN",
     help="Twitter API bearer token (or set TWITTER_BEARER_TOKEN env var)",
 )
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    default=False,
+    help="Force re-scraping even if data exists in output directory",
+)
 def main(
     urls: tuple[str, ...],
     output: Optional[Path],
     graphs: bool,
     sentiment: bool,
     twitter_token: Optional[str],
+    force: bool,
 ):
     """Analyze cross-platform interactions for Twitter and Bluesky posts.
 
@@ -210,10 +253,11 @@ def main(
     console.print(f"URLs to analyze: {len(urls)}")
     console.print(f"Graphs: {'Yes' if graphs else 'No'}")
     console.print(f"Sentiment: {'Yes' if sentiment else 'No'}")
+    console.print(f"Use cached data: {'No (--force)' if force else 'Yes'}")
     console.print()
 
     try:
-        asyncio.run(run_analysis(list(urls), output_dir, graphs, sentiment))
+        asyncio.run(run_analysis(list(urls), output_dir, graphs, sentiment, force))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
     except Exception as e:
